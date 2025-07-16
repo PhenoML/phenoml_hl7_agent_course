@@ -300,4 +300,74 @@ def list_agents(client: PhenoMLClient):
         return agents
     else:
         print("✗ Failed to list agents")
+        return None
+
+
+def extract_medical_codes(client: PhenoMLClient, 
+                         text: str, 
+                         system_name: str = "ICD-10-CM", 
+                         system_version: str = "2025",
+                         chunking_method: str = "none",
+                         max_codes_per_chunk: int = 20,
+                         code_similarity_filter: float = 0.9,
+                         include_rationale: bool = True):
+    """Extract medical codes from natural language text using construe extract"""
+    print(f"\n Extracting medical codes from: '{text}'")
+    
+    data = {
+        "system": {
+            "name": system_name,
+            "version": system_version
+        },
+        "config": {
+            "chunking_method": chunking_method,
+            "max_codes_per_chunk": max_codes_per_chunk,
+            "code_similarity_filter": code_similarity_filter,
+            "include_rationale": include_rationale
+        },
+        "text": text
+    }
+    
+    # Debug: Print the exact request payload
+    print(f" Request payload: {json.dumps(data, indent=2)}")
+        
+    response = client.request('POST', '/construe/extract', data)
+    
+    if response:
+        # Check if response has codes directly (successful response)
+        if response.get('codes'):
+            print("✓ Medical codes extracted successfully!")
+            
+            codes = response.get('codes', [])
+            system_info = response.get('system', {})
+            system_name = system_info.get('name', 'Unknown')
+            system_version = system_info.get('version', 'Unknown')
+            
+            print(f"   System: {system_name} {system_version}")
+            print(f"   Found {len(codes)} medical codes:")
+            
+            for i, code in enumerate(codes):
+                code_value = code.get('code', 'Unknown')
+                description = code.get('description', 'No description')
+                reason = code.get('reason', '')
+                
+                print(f"    {i+1}. Code: {code_value}")
+                print(f"       Description: {description}")
+                if reason and include_rationale:
+                    print(f"       Reason: {reason}")
+                print()
+            
+            return response
+        else:
+            print("✗ Failed to extract medical codes")
+            if response.get('message'):
+                print(f"   Error: {response.get('message')}")
+            elif response.get('error'):
+                print(f"   Error: {response.get('error')}")
+            else:
+                print("   Error: Unknown error occurred")
+            return None
+    else:
+        print("✗ Failed to extract medical codes")
+        print("   Error: No response received")
         return None 
