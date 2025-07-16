@@ -30,7 +30,7 @@ class PhenoMLClient:
         self.email = email
         self.password = password
         
-    def authenticate(self) -> bool:
+    def _authenticate(self) -> bool:
         """Authenticate with the PhenoML API"""
         auth_data = {"identity": self.email, "password": self.password}
         
@@ -53,7 +53,7 @@ class PhenoMLClient:
             print(f"✗ Authentication error: {str(e)}")
             return False
     
-    def request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Optional[Dict]:
+    def _request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Optional[Dict]:
         """Make authenticated request to API"""
         if not self.token:
             print("✗ No authentication token available")
@@ -80,6 +80,199 @@ class PhenoMLClient:
             print(f"✗ Request error: {str(e)}")
             return None
 
+    def create_prompt(self, name: str, content: str, description: str = None) -> Optional[str]:
+        """Create an AI agent prompt"""
+        print(f"\n Creating prompt: '{name}'")
+        
+        data = {
+            "name": name,
+            "description": description or f"Prompt for {name}",
+            "type": "system",
+            "content": content,
+            "is_active": True,
+            "is_default": False,
+            "tags": ["demo"]
+        }
+        
+        response = self._request('POST', '/agent/prompts', data)
+        
+        if response and response.get('success'):
+            prompt_id = response.get('data', {}).get('id') or response.get('id')
+            if prompt_id:
+                print(f"✓ Prompt created with ID: {prompt_id}")
+                return prompt_id
+        
+        # Try to find existing prompt
+        response = self._request('GET', '/agent/prompts')
+        if response and response.get('success'):
+            prompts = response.get('prompts', []) or response.get('data', [])
+            for prompt in prompts:
+                if prompt.get('name') == name:
+                    prompt_id = prompt.get('id')
+                    print(f"✓ Found existing prompt with ID: {prompt_id}")
+                    return prompt_id
+        
+        print("✗ Failed to create or find prompt")
+        return None
+
+    def create_agent(self, name: str, prompts: List[str], tools: List[str] = None, provider: str = None, meta: Dict = None) -> Optional[str]:
+        """Create an AI agent"""
+        print(f"\n Creating agent: '{name}'")
+        
+        data = {
+            "name": name,
+            "description": f"AI agent for {name}",
+            "prompts": prompts,  # Array of prompt IDs
+            "is_active": True,
+            "tools": tools or ["lang2fhir_create", "lang2fhir_search"],
+            "tags": ["demo"]
+        }
+        
+        if provider:
+            data["provider"] = provider
+        
+        if meta:
+            data["meta"] = meta
+        
+        response = self._request('POST', '/agent/create', data)
+        
+        if response and response.get('success'):
+            agent_id = response.get('data', {}).get('id')
+            if agent_id:
+                print(f"✓ Agent created with ID: {agent_id}")
+                return agent_id
+        
+        print("✗ Failed to create agent")
+        return None
+
+    def chat_with_agent(self, message: str, agent_id: str, session_id: str = None):
+        """Chat with a specific agent"""
+        print(f"\n Chatting with agent: '{message}'")
+        
+        data = {"message": message, "agent_id": agent_id, "session_id": session_id}
+        response = self._request('POST', '/agent/chat', data)
+        
+        if response and response.get('success'):
+            print(f" Agent: {response.get('response', 'No response')}")
+            return response
+        else:
+            print("✗ Chat failed")
+            if response:
+                print(f"  Error: {response.get('message', 'Unknown error')}")
+            return None
+
+    def list_prompts(self):
+        """List all available prompts"""
+        print("\n Listing prompts...")
+        
+        response = self._request('GET', '/agent/prompts')
+        
+        if response and response.get('success'):
+            prompts = response.get('prompts', []) or response.get('data', [])
+            print(f"✓ Found {len(prompts)} prompts")
+            
+            for i, prompt in enumerate(prompts):
+                print(f"  {i+1}. {prompt.get('name')} (ID: {prompt.get('id')})")
+                print(f"     Description: {prompt.get('description', 'No description')}")
+                print(f"     Active: {prompt.get('is_active')}")
+                print()
+            
+            return prompts
+        else:
+            print("✗ Failed to list prompts")
+            return None
+
+    def list_agents(self):
+        """List all available agents"""
+        print("\n Listing agents...")
+        
+        response = self._request('GET', '/agent/list')
+        
+        if response and response.get('success'):
+            agents = response.get('agents', []) or response.get('data', [])
+            print(f"✓ Found {len(agents)} agents")
+            
+            for i, agent in enumerate(agents):
+                print(f"  {i+1}. {agent.get('name')} (ID: {agent.get('id')})")
+                print(f"     Description: {agent.get('description', 'No description')}")
+                print(f"     Tools: {agent.get('tools', [])}")
+                print(f"     Active: {agent.get('is_active')}")
+                print()
+            
+            return agents
+        else:
+            print("✗ Failed to list agents")
+            return None
+
+    def extract_medical_codes(self, 
+                             text: str, 
+                             system_name: str = "ICD-10-CM", 
+                             system_version: str = "2025",
+                             chunking_method: str = "none",
+                             max_codes_per_chunk: int = 20,
+                             code_similarity_filter: float = 0.9,
+                             include_rationale: bool = True):
+        """Extract medical codes from natural language text using construe extract"""
+        print(f"\n Extracting medical codes from: '{text}'")
+        
+        data = {
+            "system": {
+                "name": system_name,
+                "version": system_version
+            },
+            "config": {
+                "chunking_method": chunking_method,
+                "max_codes_per_chunk": max_codes_per_chunk,
+                "code_similarity_filter": code_similarity_filter,
+                "include_rationale": include_rationale
+            },
+            "text": text
+        }
+        
+        # Debug: Print the exact request payload
+        print(f" Request payload: {json.dumps(data, indent=2)}")
+            
+        response = self._request('POST', '/construe/extract', data)
+        
+        if response:
+            # Check if response has codes directly (successful response)
+            if response.get('codes'):
+                print("✓ Medical codes extracted successfully!")
+                
+                codes = response.get('codes', [])
+                system_info = response.get('system', {})
+                system_name = system_info.get('name', 'Unknown')
+                system_version = system_info.get('version', 'Unknown')
+                
+                print(f"   System: {system_name} {system_version}")
+                print(f"   Found {len(codes)} medical codes:")
+                
+                for i, code in enumerate(codes):
+                    code_value = code.get('code', 'Unknown')
+                    description = code.get('description', 'No description')
+                    reason = code.get('reason', '')
+                    
+                    print(f"    {i+1}. Code: {code_value}")
+                    print(f"       Description: {description}")
+                    if reason and include_rationale:
+                        print(f"       Reason: {reason}")
+                    print()
+                
+                return response
+            else:
+                print("✗ Failed to extract medical codes")
+                if response.get('message'):
+                    print(f"   Error: {response.get('message')}")
+                elif response.get('error'):
+                    print(f"   Error: {response.get('error')}")
+                else:
+                    print("   Error: Unknown error occurred")
+                return None
+        else:
+            print("✗ Failed to extract medical codes")
+            print("   Error: No response received")
+            return None
+
 
 def demo_lang2fhir_create(client: PhenoMLClient, resource_type: str, text: str, provider: str = None, fhir_store_id: str = None, on_behalf_of_email: str = None):
     """Create FHIR resources from natural language"""
@@ -102,7 +295,7 @@ def demo_lang2fhir_create(client: PhenoMLClient, resource_type: str, text: str, 
     # Debug: Print the exact request payload
     print(f" Request payload: {json.dumps(data, indent=2)}")
         
-    response = client.request('POST', '/tools/lang2fhir-and-create', data)
+    response = client._request('POST', '/tools/lang2fhir-and-create', data)
     
     if response and response.get('success'):
         print("✓ Resource created successfully!")
@@ -147,7 +340,7 @@ def demo_lang2fhir_search(client: PhenoMLClient, text: str, provider: str = None
     # Debug: Print the exact request payload
     print(f"Request payload: {json.dumps(data, indent=2)}")
     
-    response = client.request('POST', '/tools/lang2fhir-and-search', data)
+    response = client._request('POST', '/tools/lang2fhir-and-search', data)
     
     if response and response.get('success'):
         results = response.get('fhir_results', [])
@@ -171,203 +364,4 @@ def demo_lang2fhir_search(client: PhenoMLClient, text: str, provider: str = None
         print("✗ Search failed")
         if response:
             print(f"  Error: {response.get('message', 'Unknown error')}")
-        return None
-
-
-def create_prompt(client: PhenoMLClient, name: str, content: str, description: str = None) -> Optional[str]:
-    """Create an AI agent prompt"""
-    print(f"\n Creating prompt: '{name}'")
-    
-    data = {
-        "name": name,
-        "description": description or f"Prompt for {name}",
-        "type": "system",
-        "content": content,
-        "is_active": True,
-        "is_default": False,
-        "tags": ["demo"]
-    }
-    
-    response = client.request('POST', '/agent/prompts', data)
-    
-    if response and response.get('success'):
-        prompt_id = response.get('data', {}).get('id') or response.get('id')
-        if prompt_id:
-            print(f"✓ Prompt created with ID: {prompt_id}")
-            return prompt_id
-    
-    # Try to find existing prompt
-    response = client.request('GET', '/agent/prompts')
-    if response and response.get('success'):
-        prompts = response.get('prompts', []) or response.get('data', [])
-        for prompt in prompts:
-            if prompt.get('name') == name:
-                prompt_id = prompt.get('id')
-                print(f"✓ Found existing prompt with ID: {prompt_id}")
-                return prompt_id
-    
-    print("✗ Failed to create or find prompt")
-    return None
-
-
-def create_agent(client: PhenoMLClient, name: str, prompts: List[str], tools: List[str] = None, provider: str = None, meta: Dict = None) -> Optional[str]:
-    """Create an AI agent"""
-    print(f"\n Creating agent: '{name}'")
-    
-    data = {
-        "name": name,
-        "description": f"AI agent for {name}",
-        "prompts": prompts,  # Array of prompt IDs
-        "is_active": True,
-        "tools": tools or ["lang2fhir_create", "lang2fhir_search"],
-        "tags": ["demo"]
-    }
-    
-    if provider:
-        data["provider"] = provider
-    
-    if meta:
-        data["meta"] = meta
-    
-    response = client.request('POST', '/agent/create', data)
-    
-    if response and response.get('success'):
-        agent_id = response.get('data', {}).get('id')
-        if agent_id:
-            print(f"✓ Agent created with ID: {agent_id}")
-            return agent_id
-    
-    print("✗ Failed to create agent")
-    return None
-
-
-def chat_with_agent(client: PhenoMLClient, message: str, agent_id: str, session_id: str = None):
-    """Chat with a specific agent"""
-    print(f"\n Chatting with agent: '{message}'")
-    
-    data = {"message": message, "agent_id": agent_id, "session_id": session_id}
-    response = client.request('POST', '/agent/chat', data)
-    
-    if response and response.get('success'):
-        print(f" Agent: {response.get('response', 'No response')}")
-        return response
-    else:
-        print("✗ Chat failed")
-        if response:
-            print(f"  Error: {response.get('message', 'Unknown error')}")
-        return None
-
-
-def list_prompts(client: PhenoMLClient):
-    """List all available prompts"""
-    print("\n Listing prompts...")
-    
-    response = client.request('GET', '/agent/prompts')
-    
-    if response and response.get('success'):
-        prompts = response.get('prompts', []) or response.get('data', [])
-        print(f"✓ Found {len(prompts)} prompts")
-        
-        for i, prompt in enumerate(prompts):
-            print(f"  {i+1}. {prompt.get('name')} (ID: {prompt.get('id')})")
-            print(f"     Description: {prompt.get('description', 'No description')}")
-            print(f"     Active: {prompt.get('is_active')}")
-            print()
-        
-        return prompts
-    else:
-        print("✗ Failed to list prompts")
-        return None
-
-
-def list_agents(client: PhenoMLClient):
-    """List all available agents"""
-    print("\n Listing agents...")
-    
-    response = client.request('GET', '/agent/list')
-    
-    if response and response.get('success'):
-        agents = response.get('agents', []) or response.get('data', [])
-        print(f"✓ Found {len(agents)} agents")
-        
-        for i, agent in enumerate(agents):
-            print(f"  {i+1}. {agent.get('name')} (ID: {agent.get('id')})")
-            print(f"     Description: {agent.get('description', 'No description')}")
-            print(f"     Tools: {agent.get('tools', [])}")
-            print(f"     Active: {agent.get('is_active')}")
-            print()
-        
-        return agents
-    else:
-        print("✗ Failed to list agents")
-        return None
-
-
-def extract_medical_codes(client: PhenoMLClient, 
-                         text: str, 
-                         system_name: str = "ICD-10-CM", 
-                         system_version: str = "2025",
-                         chunking_method: str = "none",
-                         max_codes_per_chunk: int = 20,
-                         code_similarity_filter: float = 0.9,
-                         include_rationale: bool = True):
-    """Extract medical codes from natural language text using construe extract"""
-    print(f"\n Extracting medical codes from: '{text}'")
-    
-    data = {
-        "system": {
-            "name": system_name,
-            "version": system_version
-        },
-        "config": {
-            "chunking_method": chunking_method,
-            "max_codes_per_chunk": max_codes_per_chunk,
-            "code_similarity_filter": code_similarity_filter,
-            "include_rationale": include_rationale
-        },
-        "text": text
-    }
-    
-    # Debug: Print the exact request payload
-    print(f" Request payload: {json.dumps(data, indent=2)}")
-        
-    response = client.request('POST', '/construe/extract', data)
-    
-    if response:
-        # Check if response has codes directly (successful response)
-        if response.get('codes'):
-            print("✓ Medical codes extracted successfully!")
-            
-            codes = response.get('codes', [])
-            system_info = response.get('system', {})
-            system_name = system_info.get('name', 'Unknown')
-            system_version = system_info.get('version', 'Unknown')
-            
-            print(f"   System: {system_name} {system_version}")
-            print(f"   Found {len(codes)} medical codes:")
-            
-            for i, code in enumerate(codes):
-                code_value = code.get('code', 'Unknown')
-                description = code.get('description', 'No description')
-                reason = code.get('reason', '')
-                
-                print(f"    {i+1}. Code: {code_value}")
-                print(f"       Description: {description}")
-                if reason and include_rationale:
-                    print(f"       Reason: {reason}")
-                print()
-            
-            return response
-        else:
-            print("✗ Failed to extract medical codes")
-            if response.get('message'):
-                print(f"   Error: {response.get('message')}")
-            elif response.get('error'):
-                print(f"   Error: {response.get('error')}")
-            else:
-                print("   Error: Unknown error occurred")
-            return None
-    else:
-        print("✗ Failed to extract medical codes")
-        print("   Error: No response received")
         return None 
