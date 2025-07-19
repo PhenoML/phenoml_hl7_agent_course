@@ -81,7 +81,7 @@ class PhenoMLClient:
             return None
 
 
-def demo_lang2fhir_create(client: PhenoMLClient, resource_type: str, text: str, provider: str = None, fhir_store_id: str = None, on_behalf_of_email: str = None):
+def demo_lang2fhir_create(client: PhenoMLClient, resource_type: str, text: str, provider: str = None, fhir_store_id: str = None, instance_name: str = None, on_behalf_of_email: str = None):
     """Create FHIR resources from natural language"""
     print(f"\n Creating {resource_type} from: '{text}'")
     
@@ -93,6 +93,8 @@ def demo_lang2fhir_create(client: PhenoMLClient, resource_type: str, text: str, 
     meta = {}
     if fhir_store_id:
         meta["fhir_store_id"] = fhir_store_id
+    if instance_name:
+        meta["instance_name"] = instance_name
     if on_behalf_of_email:
         meta["on_behalf_of_email"] = on_behalf_of_email
     
@@ -119,7 +121,7 @@ def demo_lang2fhir_create(client: PhenoMLClient, resource_type: str, text: str, 
         return None
 
 
-def demo_lang2fhir_search(client: PhenoMLClient, text: str, provider: str = None, fhir_store_id: str = None, on_behalf_of_email: str = None, patient_id: str = None, practitioner_id: str = None, count: int = None):
+def demo_lang2fhir_search(client: PhenoMLClient, text: str, provider: str = None, fhir_store_id: str = None, instance_name: str = None, on_behalf_of_email: str = None, patient_id: str = None, practitioner_id: str = None, count: int = None):
     """Search FHIR resources using natural language"""
     print(f"\n Searching for: '{text}'")
     
@@ -131,6 +133,8 @@ def demo_lang2fhir_search(client: PhenoMLClient, text: str, provider: str = None
     meta = {}
     if fhir_store_id:
         meta["fhir_store_id"] = fhir_store_id
+    if instance_name:
+        meta["instance_name"] = instance_name
     if on_behalf_of_email:
         meta["on_behalf_of_email"] = on_behalf_of_email
     
@@ -210,8 +214,25 @@ def create_prompt(client: PhenoMLClient, name: str, content: str, description: s
     return None
 
 
-def create_agent(client: PhenoMLClient, name: str, prompts: List[str], tools: List[str] = None, provider: str = None, meta: Dict = None) -> Optional[str]:
-    """Create an AI agent"""
+def create_agent(client: PhenoMLClient, 
+                name: str, 
+                prompts: List[str], 
+                tools: List[str] = None, 
+                provider = None,  # Can be str or List[str]
+                meta: Dict = None) -> Optional[str]:
+    """Create an AI agent
+    
+    Args:
+        client: PhenoMLClient instance
+        name: Name of the agent
+        prompts: List of prompt IDs
+        tools: List of tools the agent can use
+        provider: Single provider (str) or list of providers (List[str])
+        meta: Additional metadata
+    
+    Returns:
+        Agent ID if successful, None otherwise
+    """
     print(f"\n Creating agent: '{name}'")
     
     data = {
@@ -224,10 +245,21 @@ def create_agent(client: PhenoMLClient, name: str, prompts: List[str], tools: Li
     }
     
     if provider:
-        data["provider"] = provider
+        # Handle both single provider (string) and multiple providers (list)
+        if isinstance(provider, str):
+            data["provider"] = provider
+            print(f"  Using provider: {provider}")
+        elif isinstance(provider, list):
+            data["provider"] = provider
+            print(f"  Using providers: {', '.join(provider)}")
+        else:
+            print(f"  Warning: Invalid provider type. Expected str or list, got {type(provider)}")
     
     if meta:
         data["meta"] = meta
+    
+    # Debug: Print the exact request payload
+    print(f"  Request payload: {json.dumps(data, indent=2)}")
     
     response = client.request('POST', '/agent/create', data)
     
@@ -238,6 +270,8 @@ def create_agent(client: PhenoMLClient, name: str, prompts: List[str], tools: Li
             return agent_id
     
     print("✗ Failed to create agent")
+    if response and response.get('message'):
+        print(f"  Error: {response.get('message')}")
     return None
 
 
