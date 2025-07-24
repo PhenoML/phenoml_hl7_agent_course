@@ -19,16 +19,18 @@ from typing import Dict, Optional, List
 from google.colab import userdata
 BASE_URL = userdata.get('PHENOML_BASE_URL')
 EMAIL = userdata.get('PHENOML_EMAIL')
+IDENTITY = userdata.get('PHENOML_IDENTITY')
 PASSWORD = userdata.get('PHENOML_PASSWORD')
 
 
 class PhenoMLClient:
     """Simple client for PhenoML API interactions"""
     
-    def __init__(self, base_url: str = BASE_URL, email: str = EMAIL, password: str = PASSWORD):
+    def __init__(self, base_url: str = BASE_URL, email: str = EMAIL, identity: str = IDENTITY, password: str = PASSWORD):
         self.token = None
         self.base_url = base_url
         self.email = email
+        self.identity = identity
         self.password = password
         
     def authenticate(self) -> bool:
@@ -57,12 +59,12 @@ class PhenoMLClient:
     def authenticate_token(self) -> bool:
         """Authenticate with the PhenoML API using the new auth endpoint"""
         # Create Basic auth credentials by encoding identity:pass
-        credentials = f"{self.email}:{self.password}"
+        credentials = f"{self.identity}:{self.password}"
         encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
         
         try:
             response = requests.post(
-                "https://experiment.app.pheno.ml/auth/token",
+                f"{self.base_url}/auth/token",
                 headers={
                     "accept": "application/json",
                     "authorization": f"Basic {encoded_credentials}"
