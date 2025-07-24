@@ -17,12 +17,18 @@ from typing import Dict, Optional, List
 
 # Get environment variables from Google Colab userdata
 from google.colab import userdata
-BASE_URL = userdata.get('PHENOML_BASE_URL')
 
-# Check for either PHENOML_IDENTITY or PHENOML_EMAIL (for backwards compatibility)
-IDENTITY = userdata.get('PHENOML_IDENTITY') or userdata.get('PHENOML_EMAIL')
-EMAIL = userdata.get('PHENOML_EMAIL') or IDENTITY  # Use IDENTITY if EMAIL not set
-PASSWORD = userdata.get('PHENOML_PASSWORD')
+def safe_get_secret(key):
+    """Safely get a secret, returning None if it doesn't exist"""
+    try:
+        return userdata.get(key)
+    except:
+        return None
+
+BASE_URL = safe_get_secret('PHENOML_BASE_URL')
+IDENTITY = safe_get_secret('PHENOML_IDENTITY') or safe_get_secret('PHENOML_EMAIL')
+EMAIL = safe_get_secret('PHENOML_EMAIL') or IDENTITY
+PASSWORD = safe_get_secret('PHENOML_PASSWORD')
 
 
 class PhenoMLClient:
