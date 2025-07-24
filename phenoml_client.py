@@ -18,8 +18,10 @@ from typing import Dict, Optional, List
 # Get environment variables from Google Colab userdata
 from google.colab import userdata
 BASE_URL = userdata.get('PHENOML_BASE_URL')
-EMAIL = userdata.get('PHENOML_EMAIL')
-IDENTITY = userdata.get('PHENOML_IDENTITY')
+
+# Check for either PHENOML_IDENTITY or PHENOML_EMAIL (for backwards compatibility)
+IDENTITY = userdata.get('PHENOML_IDENTITY') or userdata.get('PHENOML_EMAIL')
+EMAIL = userdata.get('PHENOML_EMAIL') or IDENTITY  # Use IDENTITY if EMAIL not set
 PASSWORD = userdata.get('PHENOML_PASSWORD')
 
 
@@ -29,35 +31,13 @@ class PhenoMLClient:
     def __init__(self, base_url: str = BASE_URL, email: str = EMAIL, identity: str = IDENTITY, password: str = PASSWORD):
         self.token = None
         self.base_url = base_url
-        self.email = email
-        self.identity = identity
+        # Use identity if provided, otherwise fall back to email for backwards compatibility
+        self.identity = identity or email
+        self.email = email or identity  # Ensure email has a value
         self.password = password
         
     def authenticate(self) -> bool:
-        """Authenticate with the PhenoML API"""
-        auth_data = {"identity": self.email, "password": self.password}
-        
-        try:
-            response = requests.post(
-                f"{self.base_url}/api/collections/users/auth-with-password?fields=token",
-                json=auth_data,
-                headers={"Content-Type": "application/json"}
-            )
-            
-            if response.status_code == 200:
-                self.token = response.json().get('token')
-                print("✓ Authentication successful!")
-                return True
-            else:
-                print(f"✗ Authentication failed: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            print(f"✗ Authentication error: {str(e)}")
-            return False
-
-    def authenticate_token(self) -> bool:
-        """Authenticate with the PhenoML API using the new auth endpoint"""
+        """Authenticate with the PhenoML API using the token endpoint"""
         # Create Basic auth credentials by encoding identity:pass
         credentials = f"{self.identity}:{self.password}"
         encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
@@ -74,17 +54,18 @@ class PhenoMLClient:
             if response.status_code == 200:
                 response_data = response.json()
                 self.token = response_data.get('token') or response_data.get('access_token')
-                print("✓ Token authentication successful!")
+                print("✓ Authentication successful!")
                 return True
             else:
-                print(f"✗ Token authentication failed: {response.status_code}")
+                print(f"✗ Authentication failed: {response.status_code}")
                 print(f"Response: {response.text}")
                 return False
                 
         except Exception as e:
-            print(f"✗ Token authentication error: {str(e)}")
+            print(f"✗ Authentication error: {str(e)}")
             return False
-    
+
+
     def request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Optional[Dict]:
         """Make authenticated request to API"""
         if not self.token:
