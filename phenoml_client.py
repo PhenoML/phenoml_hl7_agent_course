@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import base64
 from typing import Dict, Optional, List
 
 # uncomment the following lines if you're running locally
@@ -16,43 +17,61 @@ from typing import Dict, Optional, List
 
 # Get environment variables from Google Colab userdata
 from google.colab import userdata
-BASE_URL = userdata.get('PHENOML_BASE_URL')
-EMAIL = userdata.get('PHENOML_EMAIL')
-PASSWORD = userdata.get('PHENOML_PASSWORD')
+
+def safe_get_secret(key):
+    """Safely get a secret, returning None if it doesn't exist"""
+    try:
+        return userdata.get(key)
+    except:
+        return None
+
+BASE_URL = safe_get_secret('PHENOML_BASE_URL')
+IDENTITY = safe_get_secret('PHENOML_IDENTITY') or safe_get_secret('PHENOML_EMAIL')
+EMAIL = safe_get_secret('PHENOML_EMAIL') or IDENTITY
+PASSWORD = safe_get_secret('PHENOML_PASSWORD')
 
 
 class PhenoMLClient:
     """Simple client for PhenoML API interactions"""
     
-    def __init__(self, base_url: str = BASE_URL, email: str = EMAIL, password: str = PASSWORD):
+    def __init__(self, base_url: str = BASE_URL, email: str = EMAIL, identity: str = IDENTITY, password: str = PASSWORD):
         self.token = None
         self.base_url = base_url
-        self.email = email
+        # Use identity if provided, otherwise fall back to email for backwards compatibility
+        self.identity = identity or email
+        self.email = email or identity  # Ensure email has a value
         self.password = password
         
     def authenticate(self) -> bool:
-        """Authenticate with the PhenoML API"""
-        auth_data = {"identity": self.email, "password": self.password}
+        """Authenticate with the PhenoML API using the token endpoint"""
+        # Create Basic auth credentials by encoding identity:pass
+        credentials = f"{self.identity}:{self.password}"
+        encoded_credentials = base64.b64encode(credentials.encode('utf-8')).decode('utf-8')
         
         try:
             response = requests.post(
-                f"{self.base_url}/api/collections/users/auth-with-password?fields=token",
-                json=auth_data,
-                headers={"Content-Type": "application/json"}
+                f"{self.base_url}/auth/token",
+                headers={
+                    "accept": "application/json",
+                    "authorization": f"Basic {encoded_credentials}"
+                }
             )
             
             if response.status_code == 200:
-                self.token = response.json().get('token')
+                response_data = response.json()
+                self.token = response_data.get('token') or response_data.get('access_token')
                 print("✓ Authentication successful!")
                 return True
             else:
                 print(f"✗ Authentication failed: {response.status_code}")
+                print(f"Response: {response.text}")
                 return False
                 
         except Exception as e:
             print(f"✗ Authentication error: {str(e)}")
             return False
-    
+
+
     def request(self, method: str, endpoint: str, data: Optional[Dict] = None) -> Optional[Dict]:
         """Make authenticated request to API"""
         if not self.token:
@@ -173,6 +192,69 @@ def demo_lang2fhir_search(client: PhenoMLClient, text: str, provider: str = None
         return response
     else:
         print("✗ Search failed")
+        if response:
+            print(f"  Error: {response.get('message', 'Unknown error')}")
+        return None
+
+
+def demo_cohort_tool(client: PhenoMLClient, text: str, provider: str, fhir_store_id: str = None, instance_name: str = None, on_behalf_of_email: str = None):
+    """Perform cohort analysis using natural language"""
+    print(f"\n Performing cohort analysis for: '{text}'")
+    
+    data = {"text": text, "provider": provider}
+    
+    # Build meta object if we have any meta parameters
+    meta = {}
+    if fhir_store_id:
+        meta["fhir_store_id"] = fhir_store_id
+    if instance_name:
+        meta["instance_name"] = instance_name
+    if on_behalf_of_email:
+        meta["on_behalf_of_email"] = on_behalf_of_email
+    
+    if meta:
+        data["meta"] = meta
+    
+    # Debug: Print the exact request payload
+    print(f" Request payload: {json.dumps(data, indent=2)}")
+        
+    response = client.request('POST', '/tools/cohort', data)
+    
+    if response and response.get('success'):
+        print("✓ Cohort analysis completed successfully!")
+        
+        patient_count = response.get('patientCount', 0)
+        patient_ids = response.get('patientIds', [])
+        queries = response.get('queries', [])
+        message = response.get('message', '')
+        
+        print(f"  Found {patient_count} patients")
+        print(f"  Search concepts used: {len(queries)}")
+        
+        if message:
+            print(f"  Message: {message}")
+        
+        # Show first few patient IDs
+        if patient_ids:
+            print(f"  Sample patient IDs:")
+            for i, patient_id in enumerate(patient_ids[:5]):
+                print(f"    {i+1}. {patient_id}")
+            if len(patient_ids) > 5:
+                print(f"    ... and {len(patient_ids) - 5} more")
+        
+        # Show search concepts
+        if queries:
+            print(f"  Search concepts:")
+            for i, query in enumerate(queries):
+                resource_type = query.get('resourceType', 'Unknown')
+                concept = query.get('concept', 'Unknown')
+                exclude = query.get('exclude', False)
+                exclude_text = " (EXCLUDE)" if exclude else ""
+                print(f"    {i+1}. {resource_type}: {concept}{exclude_text}")
+        
+        return response
+    else:
+        print("✗ Cohort analysis failed")
         if response:
             print(f"  Error: {response.get('message', 'Unknown error')}")
         return None
